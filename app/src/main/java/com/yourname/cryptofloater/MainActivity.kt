@@ -68,8 +68,13 @@ fun saveAllCoins(prefs: SharedPreferences, gson: Gson, coins: List<CoinData>) {
 
 fun calculateProfit(principal: Double, rate: Double, times: Int): Double = principal * (1.0 + rate).pow(times.toDouble())
 
-fun sendUpdateBroadcast(context: Context, alpha: Float, size: Float, coin: String) {
-    context.sendBroadcast(Intent("UPDATE_FLOATER").apply { putExtra("alpha", alpha); putExtra("size", size); putExtra("coin", coin) })
+fun sendUpdateBroadcast(context: Context, alpha: Float, size: Float, coin: String? = null) {
+    val intent = Intent("UPDATE_FLOATER").apply {
+        putExtra("alpha", alpha)
+        putExtra("size", size)
+        if (coin != null) putExtra("coin", coin)
+    }
+    context.sendBroadcast(intent)
 }
 
 enum class Screen { Calculator, AppSettings }
@@ -108,7 +113,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("app_settings", MODE_PRIVATE)
 
-        // --- 新增：检查是否开启了自动启动悬浮窗 ---
         val autoStart = prefs.getBoolean("autoStartFloater", false)
         if (autoStart && Settings.canDrawOverlays(this)) {
             val serviceIntent = Intent(this, FloatingService::class.java)
@@ -163,7 +167,7 @@ fun MainAppScreen(
 }
 
 // ==========================================
-// 页面 1：收益计算器
+// 页面 1：收益计算器 (精简版)
 // ==========================================
 @Composable
 fun CalculatorScreen() {
@@ -172,21 +176,11 @@ fun CalculatorScreen() {
     val gson = Gson()
 
     var allCoins by remember { mutableStateOf(loadAllCoins(prefs, gson)) }
-
     var principal by remember { mutableStateOf("100") }
     var rolls by remember { mutableStateOf("3") }
     var result by remember { mutableStateOf(0.0) }
     var selectedCoin by remember { mutableStateOf(allCoins.firstOrNull()?.name ?: "") }
     var selectedTime by remember { mutableStateOf(5) }
-
-    // --- 修改：优先读取本地保存的悬浮窗设置 ---
-    var floaterAlpha by remember { mutableStateOf(prefs.getFloat("floaterAlpha", 0.8f)) }
-    var floaterSize by remember { mutableStateOf(prefs.getFloat("floaterSize", 16f)) }
-
-    // 修复：进入页面时，判断如果设置了自动启动且有权限，就认为服务已经处于运行状态
-    var isServiceRunning by remember {
-        mutableStateOf(prefs.getBoolean("autoStartFloater", false) && Settings.canDrawOverlays(context))
-    }
 
     var showAddEditDialog by remember { mutableStateOf(false) }
     var coinToEdit by remember { mutableStateOf<CoinData?>(null) }
@@ -210,7 +204,9 @@ fun CalculatorScreen() {
                         isSelected = selectedCoin == coin.name,
                         onClick = {
                             selectedCoin = coin.name
-                            sendUpdateBroadcast(context, floaterAlpha, floaterSize, selectedCoin)
+                            val currentAlpha = prefs.getFloat("floaterAlpha", 0.8f)
+                            val currentSize = prefs.getFloat("floaterSize", 16f)
+                            sendUpdateBroadcast(context, currentAlpha, currentSize, selectedCoin)
                         },
                         onLongClick = { coinMenuExpandedFor = coin }
                     )
@@ -235,7 +231,9 @@ fun CalculatorScreen() {
                                 if (selectedCoin == coin.name) {
                                     selectedCoin = allCoins.firstOrNull()?.name ?: ""
                                 }
-                                sendUpdateBroadcast(context, floaterAlpha, floaterSize, selectedCoin)
+                                val currentAlpha = prefs.getFloat("floaterAlpha", 0.8f)
+                                val currentSize = prefs.getFloat("floaterSize", 16f)
+                                sendUpdateBroadcast(context, currentAlpha, currentSize, selectedCoin)
                                 context.sendBroadcast(Intent("RELOAD_COINS"))
                                 coinMenuExpandedFor = null
                             }
@@ -272,62 +270,6 @@ fun CalculatorScreen() {
             }, modifier = Modifier.fillMaxWidth().height(50.dp)
         ) {
             Text("开始计算 (当前赔率: ${String.format("%.1f", currentRate * 100)}% 预估: ${String.format("%.2f U", result)})")
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-        Text("悬浮窗控制", style = MaterialTheme.typography.titleLarge)
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("背景透明", modifier = Modifier.width(60.dp))
-            Slider(
-                value = floaterAlpha,
-                onValueChange = {
-                    floaterAlpha = it
-                    // --- 新增：存入本地 ---
-                    prefs.edit().putFloat("floaterAlpha", it).apply()
-                    sendUpdateBroadcast(context, floaterAlpha, floaterSize, selectedCoin)
-                },
-                valueRange = 0.0f..1f, modifier = Modifier.weight(1f)
-            )
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("字号大小", modifier = Modifier.width(60.dp))
-            Slider(
-                value = floaterSize,
-                onValueChange = {
-                    floaterSize = it
-                    // --- 新增：存入本地 ---
-                    prefs.edit().putFloat("floaterSize", it).apply()
-                    sendUpdateBroadcast(context, floaterAlpha, floaterSize, selectedCoin)
-                },
-                valueRange = 10f..24f, modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = {
-                if (!Settings.canDrawOverlays(context)) {
-                    context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
-                } else {
-                    val serviceIntent = Intent(context, FloatingService::class.java)
-                    if (isServiceRunning) {
-                        context.stopService(serviceIntent)
-                    } else {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startForegroundService(serviceIntent)
-                        } else {
-                            context.startService(serviceIntent)
-                        }
-                    }
-                    isServiceRunning = !isServiceRunning
-                }
-            }, modifier = Modifier.fillMaxWidth().height(50.dp)
-        ) {
-            Text(if (isServiceRunning) "关闭悬浮窗" else "开启悬浮窗")
         }
     }
 
@@ -396,7 +338,9 @@ fun CalculatorScreen() {
 
                         saveAllCoins(prefs, gson, allCoins)
                         selectedCoin = newCoin.name
-                        sendUpdateBroadcast(context, floaterAlpha, floaterSize, selectedCoin)
+                        val currentAlpha = prefs.getFloat("floaterAlpha", 0.8f)
+                        val currentSize = prefs.getFloat("floaterSize", 16f)
+                        sendUpdateBroadcast(context, currentAlpha, currentSize, selectedCoin)
                         context.sendBroadcast(Intent("RELOAD_COINS"))
 
                         showAddEditDialog = false
@@ -424,6 +368,9 @@ fun CoinOptionButton(text: String, isSelected: Boolean, onClick: () -> Unit, onL
     }
 }
 
+// ==========================================
+// 页面 2：设置 (带二级菜单和总开关)
+// ==========================================
 @Composable
 fun SettingsScreen(
     themeMode: Int, onThemeModeChange: (Int) -> Unit,
@@ -435,9 +382,12 @@ fun SettingsScreen(
 
     var showThemeDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
+    var showFloaterSettingsDialog by remember { mutableStateOf(false) } // 新增：控制悬浮窗二级菜单
 
-    // --- 新增：自动开启悬浮窗的设置状态 ---
     var autoStartFloater by remember { mutableStateOf(prefs.getBoolean("autoStartFloater", false)) }
+    var floaterAlpha by remember { mutableStateOf(prefs.getFloat("floaterAlpha", 0.8f)) }
+    var floaterSize by remember { mutableStateOf(prefs.getFloat("floaterSize", 16f)) }
+    var isServiceRunning by remember { mutableStateOf(prefs.getBoolean("autoStartFloater", false) && Settings.canDrawOverlays(context)) }
 
     val appVersion = remember {
         try {
@@ -447,26 +397,39 @@ fun SettingsScreen(
         }
     }
 
+    // --- 悬浮窗总开关控制逻辑 ---
+    val toggleFloatingService = { isChecked: Boolean ->
+        if (isChecked && !Settings.canDrawOverlays(context)) {
+            context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
+        } else {
+            val serviceIntent = Intent(context, FloatingService::class.java)
+            if (isChecked) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } else {
+                context.stopService(serviceIntent)
+            }
+            isServiceRunning = isChecked
+        }
+    }
+
     Column(modifier = Modifier.padding(16.dp).fillMaxSize()) {
         Text("设置", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(24.dp))
 
-        // --- 新增：启动时自动开启悬浮窗 开关 ---
+        // --- 外层极其清爽的菜单项 ---
         ListItem(
-            headlineContent = { Text("启动时自动开启悬浮窗") },
-            supportingContent = { Text("打开软件时直接唤起后台行情悬浮窗") },
+            headlineContent = { Text("悬浮窗设置") },
+            supportingContent = { Text("控制总开关、透明度、字号及自启选项") },
+            modifier = Modifier.clickable { showFloaterSettingsDialog = true },
             trailingContent = {
+                // 右侧的外层总开关
                 Switch(
-                    checked = autoStartFloater,
-                    onCheckedChange = { isChecked ->
-                        autoStartFloater = isChecked
-                        prefs.edit().putBoolean("autoStartFloater", isChecked).apply()
-
-                        // 如果用户选择了自动开启，但是还没有悬浮窗权限，引导去授权
-                        if (isChecked && !Settings.canDrawOverlays(context)) {
-                            context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
-                        }
-                    }
+                    checked = isServiceRunning,
+                    onCheckedChange = { toggleFloatingService(it) }
                 )
             }
         )
@@ -481,12 +444,79 @@ fun SettingsScreen(
 
         ListItem(
             headlineContent = { Text("关于本应用") },
-            supportingContent = { Text("版本：v$appVersion") },
+            supportingContent = { Text("版本号：v$appVersion") },
             modifier = Modifier.clickable { showAboutDialog = true }
         )
         HorizontalDivider()
     }
 
+    // --- 新增：悬浮窗设置的二级菜单 (弹窗形式) ---
+    if (showFloaterSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showFloaterSettingsDialog = false },
+            title = { Text("悬浮窗设置") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // 自动启动开关
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("启动时自动开启", style = MaterialTheme.typography.titleMedium)
+                            Text("打开软件时直接唤起悬浮窗", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        }
+                        Switch(
+                            checked = autoStartFloater,
+                            onCheckedChange = {
+                                autoStartFloater = it
+                                prefs.edit().putBoolean("autoStartFloater", it).apply()
+                                if (it && !Settings.canDrawOverlays(context)) {
+                                    context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
+                                }
+                            }
+                        )
+                    }
+
+                    HorizontalDivider()
+
+                    // 背景透明度滑块
+                    Column {
+                        Text("背景透明度", style = MaterialTheme.typography.titleMedium)
+                        Slider(
+                            value = floaterAlpha,
+                            onValueChange = {
+                                floaterAlpha = it
+                                prefs.edit().putFloat("floaterAlpha", it).apply()
+                                sendUpdateBroadcast(context, it, floaterSize)
+                            },
+                            valueRange = 0.0f..1f
+                        )
+                    }
+
+                    // 字号大小滑块
+                    Column {
+                        Text("字号大小", style = MaterialTheme.typography.titleMedium)
+                        Slider(
+                            value = floaterSize,
+                            onValueChange = {
+                                floaterSize = it
+                                prefs.edit().putFloat("floaterSize", it).apply()
+                                sendUpdateBroadcast(context, floaterAlpha, it)
+                            },
+                            valueRange = 10f..24f
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFloaterSettingsDialog = false }) { Text("完成") }
+            }
+        )
+    }
+
+    // --- 外观与主题弹窗 ---
     if (showThemeDialog) {
         AlertDialog(
             onDismissRequest = { showThemeDialog = false },
@@ -525,13 +555,14 @@ fun SettingsScreen(
         )
     }
 
+    // --- 关于本应用弹窗 ---
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
             title = { Text("关于 CryptoFloater") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Hibt事件合约辅助工具，提供全局悬浮窗实时监控币价与滚仓收益计算。")
+                    Text("HiBt事件合约辅助工具，提供全局悬浮窗实时监控币价与滚仓收益计算。")
                     Text("当前版本：v$appVersion", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall)
                     Text("项目开源地址：\ngithub.com/easyTIDollar/CryptoFloater", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 }
