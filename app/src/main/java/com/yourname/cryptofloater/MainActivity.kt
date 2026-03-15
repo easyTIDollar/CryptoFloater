@@ -397,6 +397,17 @@ fun SettingsScreen(
     seedColorInt: Int, onSeedColorChange: (Int) -> Unit
 ) {
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    // 新增：自动获取应用的真实版本号
+    val appVersion = remember {
+        try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "未知版本"
+        } catch (e: Exception) {
+            "未知版本"
+        }
+    }
 
     Column(modifier = Modifier.padding(16.dp).fillMaxSize()) {
         Text("设置", style = MaterialTheme.typography.headlineMedium)
@@ -411,11 +422,14 @@ fun SettingsScreen(
 
         ListItem(
             headlineContent = { Text("关于本应用") },
-            supportingContent = { Text("v1.0.0 - 专注辅助交易") }
+            // 这里替换成动态变量 $appVersion
+            supportingContent = { Text("v$appVersion - 专注辅助交易") },
+            modifier = Modifier.clickable { showAboutDialog = true }
         )
         HorizontalDivider()
     }
 
+    // --- 外观与主题弹窗 ---
     if (showThemeDialog) {
         AlertDialog(
             onDismissRequest = { showThemeDialog = false },
@@ -451,6 +465,35 @@ fun SettingsScreen(
                 }
             },
             confirmButton = { TextButton(onClick = { showThemeDialog = false }) { Text("完成") } }
+        )
+    }
+
+    // --- 关于本应用弹窗 ---
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAboutDialog = false },
+            title = { Text("关于 CryptoFloater") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("一个专为加密货币交易者设计的 Android 辅助工具，提供全局悬浮窗实时监控币价与滚仓收益计算。")
+                    // 这里也替换成动态变量 $appVersion
+                    Text("当前版本：v$appVersion", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall)
+                    Text("项目开源地址：\ngithub.com/easyTIDollar/CryptoFloater", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/easyTIDollar/CryptoFloater/releases"))
+                    context.startActivity(intent)
+                }) {
+                    Text("检查更新")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAboutDialog = false }) {
+                    Text("关闭")
+                }
+            }
         )
     }
 }
