@@ -31,10 +31,15 @@ jobs:
       - name: 编译 Debug APK
         run: ./gradlew assembleDebug
 
+      # --- 新增的重命名步骤 ---
+      - name: 重命名 APK
+        run: mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/CryptoFloater-${{ github.ref_name }}.apk
+
       - name: 发布到 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/app-debug.apk
+          # --- 这里的文件路径也要跟着换成改名后的 ---
+          files: app/build/outputs/apk/debug/CryptoFloater-${{ github.ref_name }}.apk
           name: CryptoFloater ${{ github.ref_name }}
           generate_release_notes: true
           draft: false
