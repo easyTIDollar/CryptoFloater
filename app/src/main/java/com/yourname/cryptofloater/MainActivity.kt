@@ -108,6 +108,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("app_settings", MODE_PRIVATE)
 
+        // --- 新增：检查是否开启了自动启动悬浮窗 ---
+        val autoStart = prefs.getBoolean("autoStartFloater", false)
+        if (autoStart && Settings.canDrawOverlays(this)) {
+            val serviceIntent = Intent(this, FloatingService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        }
+
         setContent {
             var themeMode by remember { mutableIntStateOf(prefs.getInt("themeMode", 0)) }
             var useDynamicColor by remember { mutableStateOf(prefs.getBoolean("dynamicColor", true)) }
@@ -168,9 +179,14 @@ fun CalculatorScreen() {
     var selectedCoin by remember { mutableStateOf(allCoins.firstOrNull()?.name ?: "") }
     var selectedTime by remember { mutableStateOf(5) }
 
-    var floaterAlpha by remember { mutableStateOf(0.8f) }
-    var floaterSize by remember { mutableStateOf(16f) }
-    var isServiceRunning by remember { mutableStateOf(false) }
+    // --- 修改：优先读取本地保存的悬浮窗设置 ---
+    var floaterAlpha by remember { mutableStateOf(prefs.getFloat("floaterAlpha", 0.8f)) }
+    var floaterSize by remember { mutableStateOf(prefs.getFloat("floaterSize", 16f)) }
+
+    // 修复：进入页面时，判断如果设置了自动启动且有权限，就认为服务已经处于运行状态
+    var isServiceRunning by remember {
+        mutableStateOf(prefs.getBoolean("autoStartFloater", false) && Settings.canDrawOverlays(context))
+    }
 
     var showAddEditDialog by remember { mutableStateOf(false) }
     var coinToEdit by remember { mutableStateOf<CoinData?>(null) }
@@ -264,12 +280,30 @@ fun CalculatorScreen() {
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("背景透明", modifier = Modifier.width(60.dp))
-            Slider(value = floaterAlpha, onValueChange = { floaterAlpha = it; sendUpdateBroadcast(context, floaterAlpha, floaterSize, selectedCoin) }, valueRange = 0.0f..1f, modifier = Modifier.weight(1f))
+            Slider(
+                value = floaterAlpha,
+                onValueChange = {
+                    floaterAlpha = it
+                    // --- 新增：存入本地 ---
+                    prefs.edit().putFloat("floaterAlpha", it).apply()
+                    sendUpdateBroadcast(context, floaterAlpha, floaterSize, selectedCoin)
+                },
+                valueRange = 0.0f..1f, modifier = Modifier.weight(1f)
+            )
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("字号大小", modifier = Modifier.width(60.dp))
-            Slider(value = floaterSize, onValueChange = { floaterSize = it; sendUpdateBroadcast(context, floaterAlpha, floaterSize, selectedCoin) }, valueRange = 10f..24f, modifier = Modifier.weight(1f))
+            Slider(
+                value = floaterSize,
+                onValueChange = {
+                    floaterSize = it
+                    // --- 新增：存入本地 ---
+                    prefs.edit().putFloat("floaterSize", it).apply()
+                    sendUpdateBroadcast(context, floaterAlpha, floaterSize, selectedCoin)
+                },
+                valueRange = 10f..24f, modifier = Modifier.weight(1f)
+            )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -396,11 +430,15 @@ fun SettingsScreen(
     useDynamicColor: Boolean, onDynamicColorChange: (Boolean) -> Unit,
     seedColorInt: Int, onSeedColorChange: (Int) -> Unit
 ) {
+    val context = LocalContext.current
+    val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+
     var showThemeDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
-    val context = LocalContext.current
 
-    // 新增：自动获取应用的真实版本号
+    // --- 新增：自动开启悬浮窗的设置状态 ---
+    var autoStartFloater by remember { mutableStateOf(prefs.getBoolean("autoStartFloater", false)) }
+
     val appVersion = remember {
         try {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "未知版本"
@@ -413,6 +451,27 @@ fun SettingsScreen(
         Text("设置", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(24.dp))
 
+        // --- 新增：启动时自动开启悬浮窗 开关 ---
+        ListItem(
+            headlineContent = { Text("启动时自动开启悬浮窗") },
+            supportingContent = { Text("打开软件时直接唤起后台行情悬浮窗") },
+            trailingContent = {
+                Switch(
+                    checked = autoStartFloater,
+                    onCheckedChange = { isChecked ->
+                        autoStartFloater = isChecked
+                        prefs.edit().putBoolean("autoStartFloater", isChecked).apply()
+
+                        // 如果用户选择了自动开启，但是还没有悬浮窗权限，引导去授权
+                        if (isChecked && !Settings.canDrawOverlays(context)) {
+                            context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
+                        }
+                    }
+                )
+            }
+        )
+        HorizontalDivider()
+
         ListItem(
             headlineContent = { Text("外观与主题") },
             supportingContent = { Text("切换深浅色、动态取色及主色调") },
@@ -422,14 +481,12 @@ fun SettingsScreen(
 
         ListItem(
             headlineContent = { Text("关于本应用") },
-            // 这里替换成动态变量 $appVersion
-            supportingContent = { Text("v$appVersion - 专注辅助交易") },
+            supportingContent = { Text("版本：v$appVersion") },
             modifier = Modifier.clickable { showAboutDialog = true }
         )
         HorizontalDivider()
     }
 
-    // --- 外观与主题弹窗 ---
     if (showThemeDialog) {
         AlertDialog(
             onDismissRequest = { showThemeDialog = false },
@@ -468,15 +525,13 @@ fun SettingsScreen(
         )
     }
 
-    // --- 关于本应用弹窗 ---
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
             title = { Text("关于 CryptoFloater") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("一个专为加密货币交易者设计的 Android 辅助工具，提供全局悬浮窗实时监控币价与滚仓收益计算。")
-                    // 这里也替换成动态变量 $appVersion
+                    Text("Hibt事件合约辅助工具，提供全局悬浮窗实时监控币价与滚仓收益计算。")
                     Text("当前版本：v$appVersion", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall)
                     Text("项目开源地址：\ngithub.com/easyTIDollar/CryptoFloater", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 }

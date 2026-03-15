@@ -94,6 +94,12 @@ class FloatingService : Service() {
     override fun onCreate() {
         super.onCreate()
 
+        // --- 新增：服务启动时读取上次保存的透明度和字号 ---
+        val prefs = getSharedPreferences("app_settings", MODE_PRIVATE)
+        val savedAlpha = prefs.getFloat("floaterAlpha", 0.8f)
+        bgAlphaInt = (savedAlpha * 255).toInt()
+        currentTextSize = prefs.getFloat("floaterSize", 16f)
+
         // 启动前台服务，防止系统在后台挂起网络
         startForegroundServiceNotification()
 
