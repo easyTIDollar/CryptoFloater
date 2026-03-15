@@ -41,6 +41,6 @@ jobs:
           # --- 这里的文件路径也要跟着换成改名后的 ---
           files: app/build/outputs/apk/debug/CryptoFloater-${{ github.ref_name }}.apk
           name: CryptoFloater ${{ github.ref_name }}
-          generate_release_notes: false
+          generate_release_notes: true
           draft: false
           prerelease: false
